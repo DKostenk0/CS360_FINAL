@@ -1,0 +1,81 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+BEN/mftp
+BEN/mftpserve
+mftp
+mftpserve
+test/test01
+test/test02
+test/test03
+test/test04
+test/test05
+test/test06
+test/test07
+test/test08
+test/test09
+test/test10
+test/test11
+test/test12
+test/test13
+test/test14
+test/test15
+test/test16
+test/test17
+test/test18
+test/test19
+test/test20
+test/test21
+test/test22
+test/test23
+test/test24
+test/test25
