@@ -49,7 +49,7 @@ void list_directory_content(int fd) {
 	}
 }
 
-void send_file(int fd, char *path) {
+int send_file(int fd, char *path) {
 	printf("Child %d: Reading file, %s\n", getpid(), path);
 	struct stat area, *s= &area;
 	if (stat(path, s) == 0) {
@@ -57,7 +57,7 @@ void send_file(int fd, char *path) {
 			int file = open(path, O_RDONLY);
 			if (file == -1) {
 				send_error(fd, strerror(errno));
-				return;
+				return 0;
 			} else {
 
 			}
@@ -67,6 +67,7 @@ void send_file(int fd, char *path) {
 				write(fd, buf, 512);
 			}
 			close(file);
+			return 1;
 		} else if (S_ISDIR(s->st_mode)) {
 			send_error(fd, "Path is a directory");
 		} else {
@@ -175,12 +176,15 @@ void process_commands(int fd) {
 			data_fd = -1;
 
 		} else if (command == 'G') {
-			write(fd, "A\n", 2);
 			char argument[256];
 			get_argument(fd, &argument[0]);
-			send_file(data_fd, argument);
+			int success = send_file(data_fd, argument);
+			if (success) {
+				write(fd, "A\n", 2);
+			}
 			close(data_fd);
 			data_fd = -1;
+			printf("DONE SENDING\n");
 
 		}  else if (command == 'P') {
 			char argument[256];

@@ -11,23 +11,39 @@
 #include <ctype.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include "mftp.h"
-
-// FOR GET = S_IRWXU
 
 int debug = 0;
 const char* port = "49999";
 const char* server;
 
-void read_response(int fd) {
+void get_file(char *file_name, int data_fd) {
+    int file = open(file_name, O_CREAT | O_EXCL | O_WRONLY, S_IRWXU);
+    if (file == -1) {
+        printf("Open/creating local file: %s\n", strerror(errno));
+        return;
+    }
+    printf("WRITING TO FD: %d. DATA FD :%d\n", file, data_fd);
+    char buf[512];
+    int read_count;
+    while ((read_count = read(data_fd, buf, 512)) > 0) {
+        write(file, buf, read_count);
+    }
+    printf("CLOSING FD: %d\n", file);
+    close(file);
+}
+
+int read_response(int fd) {
     char resp[256];
     read(fd, resp, 256);
     if(debug) printf("RESP (%ld): '%s'\n", strlen(resp), resp);
     if(resp[0] == 'E') {
         char *error = &resp[1];
         printf("Error response from server: %s\n", error);
-
+        return 0;
     }
+    return 1;
 }
 
 void list_directory_contents() {
@@ -55,6 +71,7 @@ int request_data_connection(int fd) {
     write(fd, "D\n", 2);
 
     char buf[512];
+    printf("READING FROM FD: %d\n", fd);
     read(fd, buf, 512);
     char resp = buf[0];
 
@@ -146,8 +163,32 @@ void get_user_input(int fd) {
             read_response(fd);
 
         } else if (strcmp(command, "get") == 0) {
-            printf("GET\n");
-            
+            // Check if File exists
+            char *file_name = basename(argument);
+            int exists = access(file_name, F_OK);
+            if (exists != -1) {
+                printf("ERROR: FILE EXISTS\n");
+                continue;
+            }
+
+            // Create Data Connection
+            int port = request_data_connection(fd);
+            int data_fd = connect_to_data_connection(port);
+            // Request Data to be sent over
+            char temp[256] = "G\0";
+            strcat(temp, argument);
+            strcat(temp, "\n");
+            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
+            write(fd, temp, strlen(temp));
+
+            // Get Response
+            if (read_response(fd)) {
+                // Create and read File
+                get_file(file_name, data_fd);
+            }
+            printf("CLOSING: %d\n", data_fd);
+            close(data_fd);
+
         } else if (strcmp(command, "show") == 0) {
             int port = request_data_connection(fd);
             int data_fd = connect_to_data_connection(port);
@@ -155,9 +196,10 @@ void get_user_input(int fd) {
             strcat(temp, argument);
             strcat(temp, "\n");
             write(fd, temp, strlen(temp));
-            server_data_show(data_fd);
+            if (read_response(fd)) {
+                server_data_show(data_fd);
+            }
             close(data_fd);
-            read_response(fd);
 
         } else if (strcmp(command, "put") == 0) {
             printf("PUT\n");
