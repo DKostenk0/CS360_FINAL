@@ -18,6 +18,45 @@
 int debug = 0;
 const char* server = "localhost";
 
+// Attempts to open a file located at file_name
+// If it fails it returns -1, otherwise returns fd
+int open_file(char *file_name) {
+    struct stat area, *s= &area;
+
+    // get stats on file
+    if (stat(file_name, s) == 0) {
+        // if file is regular, try to open it
+        if (S_ISREG(s->st_mode)) {
+            int file = open(file_name, O_RDONLY);
+            if (file == -1) {
+                printf("Open/read local file: %s\n", strerror(errno));
+                return -1;
+            }
+            // if file opens, return the fd
+            return file;
+        // if file is dir or special, error out
+        } else if (S_ISDIR(s->st_mode)) {
+            printf("Open/read local file: Path is a directory\n");
+            return -1;
+        } else {
+            printf("Open/read local file: Path is a special file\n");
+            return -1;
+        }
+    // if you can't get the stats on the file error out with the errno
+    } else {
+        printf("Open/read local file: %s\n", strerror(errno));
+        return -1;
+    }
+}
+
+void send_file(int file_fd, int data_fd) {
+    char buf[4096];
+    int read_count;
+    while((read_count = read(file_fd, buf, 4096)) > 0) {
+        write(data_fd, buf, read_count);
+    }
+}
+
 
 // Gets a file from the data_fd and writes it to the filename
 // on the current working directory
@@ -31,19 +70,19 @@ void get_file(char *file_name, int data_fd) {
     if(debug) printf("WRITING TO FD: %d. DATA FD :%d\n", file, data_fd);
 
     // read bytes 512 at a time and write to the file
-    char buf[512];
+    char buf[4096] = {0};
     int read_count;
-    while ((read_count = read(data_fd, buf, 512)) > 0) {
+    while ((read_count = read(data_fd, buf, 4096)) > 0) {
         write(file, buf, read_count);
     }
-    if(deubg) printf("CLOSING FD: %d\n", file);
+    if(debug) printf("CLOSING FD: %d\n", file);
     close(file);
 }
 
 // Reads response from the server, if first character its 'E'
 // prints out the error response and returns 0, otherwise returns 1
 int read_response(int fd) {
-    char resp[256];
+    char resp[256] = {0};
     read(fd, resp, 256);
 
     if(debug) printf("RESP (%ld): '%s'\n", strlen(resp), resp);
@@ -61,13 +100,21 @@ int read_response(int fd) {
 void list_directory_contents() {
     int status;
     // fork
+    int fd[2];
+    pipe(fd);
     int cpid = fork();
     // if parent wait for child
     if (cpid) {
+        close(fd[1]);
+
         wait(&status);
+
+        dup2(fd[0], 0);
+        execlp("more", "more", "-20", (char*) 0);
     } else {
-        // execute bash script to get list of files
-        execl("/bin/sh", "sh", "-c", "ls -la | more -20", (char *) NULL);
+        close(fd[0]);
+        dup2(fd[1], 1);
+        execlp("ls", "ls", "-la", (char*) 0);
     }
 }
 
@@ -84,7 +131,7 @@ void server_data_show(int fd) {
         // get fd to output to stdin
         dup2(fd, 0);
         // execute more to show 20 lines at a time
-        execl("/bin/sh", "sh", "-c", "more -20", (char *) NULL);
+        execlp("more", "more", "-20", (char *) NULL);
     }
 }
 
@@ -95,21 +142,13 @@ int request_data_connection(int fd) {
     write(fd, "D\n", 2);
 
     // read response from control connection
-    char buf[512];
+    char buf[512] = {0};
     if(debug) printf("READING FROM FD: %d\n", fd);
-    read(fd, buf, 512);
+    int read_bytes = read(fd, buf, 512);
     char resp = buf[0];
 
     if(debug) {
-        printf("Data Connection Resp (%ld): '%s'\n", strlen(buf), buf);
-    }
-
-    // This right here also fixes it
-    // truncate everything after the newline
-    // this is the fix for the extra info bug
-    strtok(buf, "\n");
-    if(debug) {
-        printf("Clipped Data Connection Resp (%ld): '%s'\n", strlen(buf), buf);
+        printf("Data Connection Resp (read_bytes: %d) (%ld): '%s'\n", read_bytes, strlen(buf), buf);
     }
 
     // char pointer to everything after the response code
@@ -138,7 +177,7 @@ int connect_to_data_connection(int port) {
     hints.ai_family = AF_INET;
  
     // try to get connection to server
-    char str_port[6];
+    char str_port[6] = {0};
     // convert int to str
     sprintf(str_port, "%d", port);
     int err = getaddrinfo(server, str_port, &hints, &actualdata);
@@ -160,8 +199,8 @@ int connect_to_data_connection(int port) {
 }
 
 // Main function that interacts with the control connection
-void get_user_input(int fd) {
-    char buffer[512];
+void get_user_input(int control_fd) {
+    char buffer[512] = {0};
     int running = 1;
     // while you didn't quit
     while (running) {
@@ -190,7 +229,7 @@ void get_user_input(int fd) {
         // exit command
         if (strcmp(command, "exit") == 0) {
             // write to server that you're quiting and exit while loop
-            write(fd, "Q\n", 2);
+            write(control_fd, "Q\n", 2);
             running = 0;
 
         // Change directory on client
@@ -206,29 +245,39 @@ void get_user_input(int fd) {
 
             if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
             // send to server
-            write(fd, temp, strlen(temp));
+            write(control_fd, temp, strlen(temp));
             // read response, error if you need to
-            read_response(fd);
+            read_response(control_fd);
         
         // List directory content on client
         } else if (strcmp(command, "ls") == 0) {
-            list_directory_contents();
+            int status;
+            // fork off thread and have child list directory contents
+            // since it messes with stdin file descriptors
+            int cpid = fork();
+            // have parent wait for output of child to finish
+            if (cpid) {
+                wait(&status);
+            } else {
+                list_directory_contents();
+                exit(0);
+            }
 
         // List direct content on server
         } else if (strcmp(command, "rls") == 0) {
             // request a data connection and connect to it
-            int port = request_data_connection(fd);
+            int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
 
             // request directory content from server
-            write(fd, "L\n", 2);
+            write(control_fd, "L\n", 2);
 
             // show the data that returns
             server_data_show(data_fd);
             // close the data connection
             close(data_fd);
             // check for server response/error
-            read_response(fd);
+            read_response(control_fd);
 
         // Get a file from the server and put it on the client working dir
         } else if (strcmp(command, "get") == 0) {
@@ -245,17 +294,17 @@ void get_user_input(int fd) {
             }
 
             // Create Data Connection
-            int port = request_data_connection(fd);
+            int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
             // Send Get request with format 'Gpath\n'
             char temp[256] = "G\0";
             strcat(temp, argument);
             strcat(temp, "\n");
-            write(fd, temp, strlen(temp));
+            write(control_fd, temp, strlen(temp));
             if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
 
             // If not an error response (server FILE exists and you can access)
-            if (read_response(fd)) {
+            if (read_response(control_fd)) {
                 // Create and read File
                 get_file(file_name, data_fd);
             }
@@ -268,18 +317,18 @@ void get_user_input(int fd) {
         // Show a file from the server to the client
         } else if (strcmp(command, "show") == 0) {
             // Create and connect to the data connection
-            int port = request_data_connection(fd);
+            int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
 
             // Send Get request with format 'Gpath\n'
             char temp[256] = "G\0";
             strcat(temp, argument);
             strcat(temp, "\n");
-            write(fd, temp, strlen(temp));
+            write(control_fd, temp, strlen(temp));
             if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
 
             // If not an error response (server FILE exists and you can access)
-            if (read_response(fd)) {
+            if (read_response(control_fd)) {
                 // pipe data connection output into 'more' and display it
                 server_data_show(data_fd);
             }
@@ -288,7 +337,31 @@ void get_user_input(int fd) {
 
         // Put a file from the client onto the server
         } else if (strcmp(command, "put") == 0) {
-            printf("PUT\n");
+            // open file for reading (also checks if file exists and can access it)
+            int file_fd = open_file(argument);
+            if (file_fd < 0) continue;
+
+            // Create and connect to the data connection
+            int port = request_data_connection(control_fd);
+            int data_fd = connect_to_data_connection(port);
+
+            // Send Get request with format 'Gpath\n'
+            char temp[256] = "P\0";
+            strcat(temp, argument);
+            strcat(temp, "\n");
+            write(control_fd, temp, strlen(temp));
+
+            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
+
+            // If not an error response (server file doesn't exist yet)
+            if (read_response(control_fd)) {
+                // pipe data connection output into 'more' and display it
+                send_file(file_fd, data_fd);
+            }
+            // close file and data connection
+            close(file_fd);
+            close(data_fd);
+
 
         // Client command unkown, error
         } else {

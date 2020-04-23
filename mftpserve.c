@@ -68,7 +68,7 @@ void list_directory_content(int fd) {
 int send_file(int control_fd, int data_fd, char *path) {
 	printf("Child %d: Reading file, %s\n", getpid(), path);
 	struct stat area, *s= &area;
-	// error getting stats on file
+	// Get stats on file
 	if (stat(path, s) == 0) {
 		// if file is regular, send it over
 		if (S_ISREG(s->st_mode)) {
@@ -80,17 +80,16 @@ int send_file(int control_fd, int data_fd, char *path) {
 
 			}
 
-			char buf[512];
+			char buf[4096];
 			int write_count;
 			// while you can read bytes from the file, write it to the data connection
-			while ((write_count = read(file, buf, 512)) > 0) {
+			while ((write_count = read(file, buf, 4096)) > 0) {
 				if (debug) printf("Writing %d bytes to data connection\n", write_count);
 				write(data_fd, buf, strlen(buf));
 			}
 			close(file);
 			return 1;
 		// if file is dir or special, don't sent it over
-		// NOTE: ASK BEN IF WE SHOULD SEND SEND SPECIAL AS WELL
 		} else if (S_ISDIR(s->st_mode)) {
 			send_error(control_fd, "Path is a directory");
 			return 0;
@@ -115,10 +114,10 @@ void receive_file(int control_fd, int data_fd, char *file_name) {
 	}
 	// let client know to start sending data
 	write(control_fd, "A\n", 2);
-	char buf[512];
+	char buf[4096];
 	int read_count;
 	// while you are getting data from client, write it to the file
-	while((read_count = read(data_fd, buf, 512)) > 0) {
+	while((read_count = read(data_fd, buf, 4096)) > 0) {
 		if (debug) printf("Writing %d bytes to data connection\n", read_count);
 		write(file, buf, read_count);
 	}
@@ -170,21 +169,14 @@ int create_new_socket(int fd) {
 	char str_port[6];
 	sprintf(str_port, "%d", port);
 	strcat(send, str_port);
-
-	// weird stuff that makes me need the \0 sent back to not do the weird print thing
-	send[6] = '\n';
-	send[7] = '\0';
-
+	strcat(send, "\n");
 
 	if(debug) {
 		printf("Created new socket with port %d\n", port);
 		printf("Sending to client: '%s' (%ld)\n", send, strlen(send));
 	}
 
-	// If I do the send, 8 it all goes through
-	// If I do the send strlen(send) it fails
 	write(fd, send, strlen(send));
-	//write(fd, send, 8);
 
 	listen(socketfd, 1);
 
