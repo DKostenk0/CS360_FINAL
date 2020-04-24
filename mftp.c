@@ -32,6 +32,7 @@ int open_file(char *file_name) {
                 printf("Open/read local file: %s\n", strerror(errno));
                 return -1;
             }
+            if(debug) printf("  (Debug) Opened file %s\n", file_name);
             // if file opens, return the fd
             return file;
         // if file is dir or special, error out
@@ -53,6 +54,7 @@ void send_file(int file_fd, int data_fd) {
     char buf[4096];
     int read_count;
     while((read_count = read(file_fd, buf, 4096)) > 0) {
+        if(debug) printf("Read %d bytes from local file, writing to server\n", read_count);
         write(data_fd, buf, read_count);
     }
 }
@@ -67,6 +69,8 @@ void get_file(char *file_name, int data_fd) {
         printf("Open/creating local file: %s\n", strerror(errno));
         return;
     }
+
+    if(debug) printf("  (Debug) Opened file %s\n", file_name);
 
     // read bytes 512 at a time and write to the file
     char buf[4096] = {0};
@@ -90,13 +94,13 @@ int read_response(int fd) {
     char resp[256] = {0};
     read(fd, resp, 256);
 
-    if(debug) printf("RESP (%ld): '%s'\n", strlen(resp), resp);
-
     // If error, print out the error message
     if(resp[0] == 'E') {
         char *error = &resp[1];
         printf("Error response from server: %s", error);
         return 0;
+    } else if (debug) {
+        printf("  (Debug) Received success response from server\n");
     }
     return 1;
 }
@@ -107,6 +111,7 @@ void list_directory_contents() {
     // fork
     int fd[2];
     pipe(fd);
+    if(debug) printf("  (Debug) Forking and listing directory contents\n");
     int cpid = fork();
     // if parent wait for child
     if (cpid) {
@@ -128,6 +133,7 @@ void list_directory_contents() {
 void server_data_show(int fd) {
     int status;
     // fork
+    if (debug) printf("  (Debug) Forking and reading data from file descriptor %d\n", fd);
     int cpid = fork();
     // if parent wait
     if (cpid) {
@@ -144,11 +150,11 @@ void server_data_show(int fd) {
 // Returns the port # or -1 if failed
 int request_data_connection(int fd) {
     // send D request
+    if (debug) printf("  (Debug) Requesting data connection\n");
     write(fd, "D\n", 2);
 
     // read response from control connection
     char buf[512] = {0};
-    if(debug) printf("READING FROM FD: %d\n", fd);
     int read_bytes = read(fd, buf, 512);
     char resp = buf[0];
 
@@ -164,8 +170,11 @@ int request_data_connection(int fd) {
         printf("Error: %s\n", arg);
         return -1;
     }
+
+    int port = atoi(arg);
+    if(debug) printf("  (Debug) Data connection ready to connect on port %d\n", port);
     // otherwsie return the response as an int (Expected to be a 5 digit int)
-    return atoi(arg);
+    return port;
 }
 
 // connect to a port
@@ -199,6 +208,7 @@ int connect_to_data_connection(int port) {
         printf("Error: %s\n", strerror(errno));
         return -1;
     }
+    if(debug) printf("Connected to %s:%s\n", server, str_port);
 
     return socketfd;
 }
@@ -215,7 +225,6 @@ void get_user_input(int control_fd) {
         
         // get user input
         fgets(buffer, 512, stdin);
-
         // parse spaces out
         command = strtok_r(buffer, " ", &argument);
         // parse newline in argument (not there if you have an argument)
@@ -230,6 +239,9 @@ void get_user_input(int control_fd) {
             // remove newline ina rgument
             strtok(argument, "\n");
         }
+
+        if(debug) printf("  (Debug) Command: %s, argument: %s\n", command, argument);
+
 
         // exit command
         if (strcmp(command, "exit") == 0) {
@@ -250,7 +262,6 @@ void get_user_input(int control_fd) {
             strcat(temp, argument);
             strcat(temp, "\n");
 
-            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
             // send to server
             write(control_fd, temp, strlen(temp));
             // read response, error if you need to
@@ -275,6 +286,11 @@ void get_user_input(int control_fd) {
             // request a data connection and connect to it
             int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
+            if (data_fd == -1) {
+                close(data_fd);
+                printf("Error connecting to port %d\n", port);
+                continue;
+            }
 
             // request directory content from server
             write(control_fd, "L\n", 2);
@@ -303,20 +319,23 @@ void get_user_input(int control_fd) {
             // Create Data Connection
             int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
+            if (data_fd == -1) {
+                close(data_fd);
+                printf("Error connecting to port %d\n", port);
+                continue;
+            }
+
             // Send Get request with format 'Gpath\n'
             char temp[256] = "G\0";
             strcat(temp, argument);
             strcat(temp, "\n");
             write(control_fd, temp, strlen(temp));
-            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
 
             // If not an error response (server FILE exists and you can access)
             if (read_response(control_fd)) {
                 // Create and read File
                 get_file(file_name, data_fd);
             }
-
-            if(debug) printf("CLOSING: %d\n", data_fd);
 
             // close data connection
             close(data_fd);
@@ -326,13 +345,17 @@ void get_user_input(int control_fd) {
             // Create and connect to the data connection
             int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
+            if (data_fd == -1) {
+                close(data_fd);
+                printf("Error connecting to port %d\n", port);
+                continue;
+            }
 
             // Send Get request with format 'Gpath\n'
             char temp[256] = "G\0";
             strcat(temp, argument);
             strcat(temp, "\n");
             write(control_fd, temp, strlen(temp));
-            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
 
             // If not an error response (server FILE exists and you can access)
             if (read_response(control_fd)) {
@@ -351,14 +374,17 @@ void get_user_input(int control_fd) {
             // Create and connect to the data connection
             int port = request_data_connection(control_fd);
             int data_fd = connect_to_data_connection(port);
+            if (data_fd == -1) {
+                close(data_fd);
+                printf("Error connecting to port %d\n", port);
+                continue;
+            }
 
             // Send Get request with format 'Gpath\n'
             char temp[256] = "P\0";
             strcat(temp, argument);
             strcat(temp, "\n");
             write(control_fd, temp, strlen(temp));
-
-            if(debug) printf("SENT: '%s' (%ld)\n", temp, strlen(temp));
 
             // If not an error response (server file doesn't exist yet)
             if (read_response(control_fd)) {
@@ -397,6 +423,7 @@ int main(int argc, char const *argv[]) {
             }
         }
     }
+    if(debug) printf(" (Debug) Debug enabled\n");
 
     // setup
     int socketfd;

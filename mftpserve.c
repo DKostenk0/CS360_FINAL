@@ -14,6 +14,8 @@
 #include <sys/stat.h>
 #include "mftp.h"
 
+#define queue 4 
+
 int debug = 0;
 int data_fd = -1;
 
@@ -29,6 +31,7 @@ void send_error(int fd, char *error) {
 	// append a newline
 	strcat(send, "\n");
 	// send the error
+	if(debug) printf("  (Debug) Child %d: Sending error to client: '%s'\n", getpid(), send);
 	write(fd, send, strlen(send));
 }
 
@@ -51,14 +54,16 @@ void change_directory(char *path, int fd) {
 void list_directory_content(int fd) {
 	int status;
 	int cpid = fork();
+	if(debug) printf("  (Debug) Child %d: Forked proccess %d", getpid(), cpid);
 	// have parent wait
 	if (cpid) {
 		wait(&status);
 	} else {
+		if(debug) printf("  (Debug) Child %d: Printing contents of 'ls -la' to %d\n", getpid(), fd);
 		// redirect stdout to fd
 		dup2(fd, 1);
 		// execute ls -la
-		execl("/bin/sh", "sh", "-c", "ls -la", (char *) NULL);
+		execlp("ls", "ls", "-la", (char *) 0);
 	}
 }
 
@@ -73,6 +78,7 @@ void send_file(int control_fd, int data_fd, char *path) {
 		if (S_ISREG(s->st_mode)) {
 			int file = open(path, O_RDONLY);
 			if (file == -1) {
+				if(debug) printf("  (Debug) Child %d: Error opening file -> %s\n", getpid(), strerror(errno));
 				send_error(control_fd, strerror(errno));
 				return;
 			} else {
@@ -96,13 +102,16 @@ void send_file(int control_fd, int data_fd, char *path) {
 			return;
 		// if file is dir or special, don't sent it over
 		} else if (S_ISDIR(s->st_mode)) {
+			if(debug) printf("  (Debug) Child %d: Error opening file -> File is a directory\n", getpid());
 			send_error(control_fd, "File is a directory");
 			return;
 		} else {
+			if(debug) printf("  (Debug) Child %d: Error opening file -> File is a special file\n", getpid());
 			send_error(control_fd, "File is a special file");
 			return;
 		}
 	} else {
+		if(debug) printf("  (Debug) Child %d: Error opening file -> %s\n", getpid(), strerror(errno));
 		send_error(control_fd, strerror(errno));
 		return;
 	}
@@ -111,8 +120,10 @@ void send_file(int control_fd, int data_fd, char *path) {
 // Receive a file from the data connection
 void receive_file(int control_fd, int data_fd, char *file_name) {
 	// try to create file in readonly
+	if(debug) printf("  (Debug) Child %d: Creating file %s\n", getpid(), file_name);
 	int file = open(file_name, O_CREAT | O_EXCL | O_WRONLY, S_IRWXU | S_IRGRP | S_IROTH);
 	if (file == -1) {
+		if(debug) printf("  (Debug) Child %d: Error creating file -> %s\n", getpid(), strerror(errno));
 		// if you fail, return and send error to client
 		send_error(control_fd, strerror(errno));
 		return;
@@ -201,7 +212,7 @@ void process_commands(int fd) {
 	char buf[1];
 	while(read(fd, buf, 1)) {
 		char command = buf[0];
-		if (debug) printf("Child %d: RECEIVED: '%s'\n", getpid(), buf);
+		if (debug) printf("Child %d: Received: '%s'\n", getpid(), buf);
 
 		// Create new data socket
 		if (command == 'D') {
@@ -268,6 +279,8 @@ int main(int argc, char const *argv[]) {
         }
 	}
 
+	if(debug) printf("  (Debug)Parent: Debug output enabled.\n");
+
 	// setup for socket
 	struct sockaddr_in servaddr;
 	int socketfd, listenfd;
@@ -293,9 +306,11 @@ int main(int argc, char const *argv[]) {
 		printf("Error: %s\n", strerror(errno));
 		exit(errno);
 	}
-
+	if(debug) printf("  (Debug) Parent: socket created with descriptor %d\n", socketfd);
+	if(debug) printf("  (Debug) Parent: socket bound to port %d\n", port);
 	// listen on the socket
-	listen(socketfd, 4);
+	listen(socketfd, queue);
+	if(debug) printf("  (Debug) Parent: listening with connection queue of %d\n", queue);
 	while (1) {
 		// set the listen file descriptor to the
 		// accepted connection
@@ -308,6 +323,7 @@ int main(int argc, char const *argv[]) {
 		} else {
 			// get IP Address
 			if (debug) {
+				printf("Child %d: started\n", getpid());
 				char ip_str[INET_ADDRSTRLEN];
 				struct in_addr ipAddr = clientaddr.sin_addr;
 				if(inet_ntop( AF_INET, &ipAddr, ip_str, INET_ADDRSTRLEN) == NULL) {
