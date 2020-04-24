@@ -67,12 +67,17 @@ void get_file(char *file_name, int data_fd) {
         printf("Open/creating local file: %s\n", strerror(errno));
         return;
     }
-    if(debug) printf("WRITING TO FD: %d. DATA FD :%d\n", file, data_fd);
 
     // read bytes 512 at a time and write to the file
     char buf[4096] = {0};
     int read_count;
     while ((read_count = read(data_fd, buf, 4096)) > 0) {
+        if (read_count == -1) {
+            printf("Error receiving data from server: %s\n", strerror(errno));
+            close(file);
+            return;
+        }
+        if(debug) printf("Read %d bytes from server, writing to local file\n", read_count);
         write(file, buf, read_count);
     }
     if(debug) printf("CLOSING FD: %d\n", file);
@@ -90,7 +95,7 @@ int read_response(int fd) {
     // If error, print out the error message
     if(resp[0] == 'E') {
         char *error = &resp[1];
-        printf("Error response from server: %s\n", error);
+        printf("Error response from server: %s", error);
         return 0;
     }
     return 1;
@@ -234,7 +239,9 @@ void get_user_input(int control_fd) {
 
         // Change directory on client
         } else if (strcmp(command, "cd") == 0) {
-            chdir(argument);
+            if (chdir(argument) == -1) {
+                printf("Change directory: %s\n", strerror(errno));
+            }
 
         // Change directory on server
         } else if (strcmp(command, "rcd") == 0) {
@@ -390,7 +397,6 @@ int main(int argc, char const *argv[]) {
             }
         }
     }
-    printf("client\n debug: %d\n server: %s\n port: %s\n", debug, server, port);
 
     // setup
     int socketfd;

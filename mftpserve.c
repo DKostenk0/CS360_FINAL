@@ -64,8 +64,7 @@ void list_directory_content(int fd) {
 
 // sends the file in path to the data_fd
 // if it errors out it will report the error to the control fd
-// returns 0 on error, 1 on success
-int send_file(int control_fd, int data_fd, char *path) {
+void send_file(int control_fd, int data_fd, char *path) {
 	printf("Child %d: Reading file, %s\n", getpid(), path);
 	struct stat area, *s= &area;
 	// Get stats on file
@@ -75,31 +74,37 @@ int send_file(int control_fd, int data_fd, char *path) {
 			int file = open(path, O_RDONLY);
 			if (file == -1) {
 				send_error(control_fd, strerror(errno));
-				return 0;
+				return;
 			} else {
 
 			}
-
+			write(control_fd, "A\n", 2);
+			printf("Child %d: transmitting file %s to client\n", getpid(), path);
 			char buf[4096];
 			int write_count;
 			// while you can read bytes from the file, write it to the data connection
 			while ((write_count = read(file, buf, 4096)) > 0) {
+				if (write_count == -1) {
+					printf("Child %d: Error transmitting data to client: %s\n", getpid(), strerror(errno));
+					close(file);
+					return;
+				}
 				if (debug) printf("Writing %d bytes to data connection\n", write_count);
-				write(data_fd, buf, strlen(buf));
+				write(data_fd, buf, write_count);
 			}
 			close(file);
-			return 1;
+			return;
 		// if file is dir or special, don't sent it over
 		} else if (S_ISDIR(s->st_mode)) {
-			send_error(control_fd, "Path is a directory");
-			return 0;
+			send_error(control_fd, "File is a directory");
+			return;
 		} else {
-			send_error(control_fd, "Path is a special file");
-			return 0;
+			send_error(control_fd, "File is a special file");
+			return;
 		}
 	} else {
 		send_error(control_fd, strerror(errno));
-		return 0;
+		return;
 	}
 }
 
@@ -114,6 +119,7 @@ void receive_file(int control_fd, int data_fd, char *file_name) {
 	}
 	// let client know to start sending data
 	write(control_fd, "A\n", 2);
+	printf("Child %d: receiving file %s from client\n", getpid(), file_name);
 	char buf[4096];
 	int read_count;
 	// while you are getting data from client, write it to the file
@@ -218,13 +224,7 @@ void process_commands(int fd) {
 		} else if (command == 'G') {
 			char argument[256];
 			get_argument(fd, &argument[0]);
-			int success = send_file(fd, data_fd, argument);
-			// if you sent a file and everything went through
-			// let client know they can get it from data connection
-			if (success) {
-				if(debug) printf("Successfully sent '%s' to client\n", argument);
-				write(fd, "A\n", 2);
-			}
+			send_file(fd, data_fd, argument);
 			// close data socket
 			close(data_fd);
 			data_fd = -1;
@@ -267,8 +267,6 @@ int main(int argc, char const *argv[]) {
             }
         }
 	}
-	// server info
-	printf("server\ndebug: %d\n port: %d\n", debug, port);
 
 	// setup for socket
 	struct sockaddr_in servaddr;
@@ -309,12 +307,14 @@ int main(int argc, char const *argv[]) {
 			close(listenfd);
 		} else {
 			// get IP Address
-			char ip_str[INET_ADDRSTRLEN];
-			struct in_addr ipAddr = clientaddr.sin_addr;
-			if(inet_ntop( AF_INET, &ipAddr, ip_str, INET_ADDRSTRLEN) == NULL) {
-				printf("Child %d: %s\n", getpid(), strerror(errno));
-			} else {
-				printf("Child %d: Client IP address -> %s\n", getpid(), ip_str);
+			if (debug) {
+				char ip_str[INET_ADDRSTRLEN];
+				struct in_addr ipAddr = clientaddr.sin_addr;
+				if(inet_ntop( AF_INET, &ipAddr, ip_str, INET_ADDRSTRLEN) == NULL) {
+					printf("Child %d: %s\n", getpid(), strerror(errno));
+				} else {
+					printf("Child %d: Client IP address -> %s\n", getpid(), ip_str);
+				}
 			}
 
 			// Get Name
