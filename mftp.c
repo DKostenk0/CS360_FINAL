@@ -298,8 +298,7 @@ void get_user_input(int control_fd) {
             if (exists != -1) {
                 // if it does, print a pretty error message
                 // and go onto the next command
-                // TODO: MAKE IT PRETTY
-                printf("ERROR: FILE EXISTS\n");
+                printf("Error: File already exists on client\n");
                 continue;
             }
 
