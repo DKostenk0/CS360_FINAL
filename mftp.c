@@ -1,16 +1,3 @@
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <ctype.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <libgen.h>
 #include "mftp.h"
 
@@ -32,7 +19,7 @@ int open_file(char *file_name) {
                 printf("Open/read local file: %s\n", strerror(errno));
                 return -1;
             }
-            if(debug) printf("  (Debug) Opened file %s\n", file_name);
+            if(debug) printf("(Debug) Opened file %s\n", file_name);
             // if file opens, return the fd
             return file;
         // if file is dir or special, error out
@@ -70,7 +57,7 @@ void get_file(char *file_name, int data_fd) {
         return;
     }
 
-    if(debug) printf("  (Debug) Opened file %s\n", file_name);
+    if(debug) printf("(Debug) Opened file %s\n", file_name);
 
     // read bytes 512 at a time and write to the file
     char buf[4096] = {0};
@@ -100,7 +87,7 @@ int read_response(int fd) {
         printf("Error response from server: %s", error);
         return 0;
     } else if (debug) {
-        printf("  (Debug) Received success response from server\n");
+        printf("(Debug) Received success response from server\n");
     }
     return 1;
 }
@@ -111,7 +98,7 @@ void list_directory_contents() {
     // fork
     int fd[2];
     pipe(fd);
-    if(debug) printf("  (Debug) Forking and listing directory contents\n");
+    if(debug) printf("(Debug) Forking and listing directory contents\n");
     int cpid = fork();
     // if parent wait for child
     if (cpid) {
@@ -133,7 +120,7 @@ void list_directory_contents() {
 void server_data_show(int fd) {
     int status;
     // fork
-    if (debug) printf("  (Debug) Forking and reading data from file descriptor %d\n", fd);
+    if (debug) printf("(Debug) Forking and reading data from file descriptor %d\n", fd);
     int cpid = fork();
     // if parent wait
     if (cpid) {
@@ -150,7 +137,7 @@ void server_data_show(int fd) {
 // Returns the port # or -1 if failed
 int request_data_connection(int fd) {
     // send D request
-    if (debug) printf("  (Debug) Requesting data connection\n");
+    if (debug) printf("(Debug) Requesting data connection\n");
     write(fd, "D\n", 2);
 
     // read response from control connection
@@ -172,7 +159,7 @@ int request_data_connection(int fd) {
     }
 
     int port = atoi(arg);
-    if(debug) printf("  (Debug) Data connection ready to connect on port %d\n", port);
+    if(debug) printf("(Debug) Data connection ready to connect on port %d\n", port);
     // otherwsie return the response as an int (Expected to be a 5 digit int)
     return port;
 }
@@ -240,7 +227,7 @@ void get_user_input(int control_fd) {
             strtok(argument, "\n");
         }
 
-        if(debug) printf("  (Debug) Command: %s, argument: %s\n", command, argument);
+        if(debug) printf("(Debug) Command: %s, argument: %s\n", command, argument);
 
 
         // exit command
@@ -417,8 +404,16 @@ int main(int argc, char const *argv[]) {
                 debug = 1;
                 i--;
             } else if (strcmp(argv[i], "-p") == 0) {
+                if (argv[i+1] == NULL) {
+                    printf("Error: Must have a port after the '%s' argument\n", argv[i]);
+                    return 0;
+                }
                 port = argv[i+1];
             } else if (strcmp(argv[i], "-s") == 0) {
+                 if (argv[i+1] == NULL) {
+                    printf("Error: Must have a server/ip after the '%s' argument\n", argv[i]);
+                    return 0;
+                }
                 server = argv[i+1];
             }
         }

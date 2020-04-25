@@ -15,8 +15,3 @@ mftpserve.o: mftpserve.c mftp.h
 
 clean:
 	rm -f mftp.o mftp mftpserve mftpserve.o
-
-run_mftp:
-	./mftp
-run_mftp_serve:
-	./mftpserve
