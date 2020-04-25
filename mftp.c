@@ -145,9 +145,7 @@ int request_data_connection(int fd) {
     int read_bytes = read(fd, buf, 512);
     char resp = buf[0];
 
-    if(debug) {
-        printf("Data Connection Resp (read_bytes: %d) (%ld): '%s'\n", read_bytes, strlen(buf), buf);
-    }
+    if(debug) printf("Data Connection Resp (%d): '%s'\n", read_bytes, buf);
 
     // char pointer to everything after the response code
     char *arg = &buf[1];
