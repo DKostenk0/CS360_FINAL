@@ -366,7 +366,8 @@ void get_user_input(int control_fd) {
 
             // Send Get request with format 'Gpath\n'
             char temp[256] = "P\0";
-            strcat(temp, argument);
+            char *file_name = basename(argument);
+            strcat(temp, file_name);
             strcat(temp, "\n");
             write(control_fd, temp, strlen(temp));
 
